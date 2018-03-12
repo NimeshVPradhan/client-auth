@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>web-client</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/react@16/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6.15.0/babel.min.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  <script type="text/babel">
+
+(function() {
+const WS_URL = 'https://localhost:1236';
+const USER_KEY = 'userdetail';
+
+function getWsUrl() {
+  const params = (new URL(document.location)).searchParams;
+  return params.get('ws-url') || WS_URL;
+}
+
+//alert(getWsUrl());
+	
+/*Backend functions*/
+function UserService(){
+
+  this.baseUrl = getWsUrl();
+
+ 
+/*axios call functions*/
+	this.register = function(id, pw, info) {
+  return axios.put(`${this.baseUrl}/users/${id}?pw=${pw}`,
+		   info, { maxRedirects: 0 })
+    .then((response) => response.data)
+    .catch(function(err) {
+      const status = err.response.status;
+      if (status === 303) {
+			return err.response.data;
+      }
+      else {
+			throw err;
+      }
+    });
+	}
+	
+	this.login = function(id, pw) {
+  return axios.put(`${this.baseUrl}/users/${id}/auth`,
+		   { pw: pw }, { maxRedirects: 0 })
+    .then((response) => response.data)
+    .catch(function(err) {
+      const status = err.response.status;
+      if (status === 401 || status === 404) {
+	return err.response.data;
+      }
+      else {
+	throw err;
+      }
+    });
+	}
+	
+	this.info = function(id, authToken) {
+  return axios.request({ url: `${this.baseUrl}/users/${id}`,
+			 method: 'get',
+			 headers: {
+			   Authorization: `Bearer ${authToken}`
+			 }
+		       })
+    .then((response) => response.data)
+    .catch(function(err) {
+      const status = err.response.status;
+      if (status === 401 || status === 404) {
+	return err.response.data;
+      }
+      else {
+	throw err;
+      }
+    });
+	}
+
+}
+
+
+/*Auxilary functions*/
+function emailFormatHandler(event){
+ 	const email = event.target.value;
+ 	if(email.trim().length !== 0 && !email.match(/^\w+@\w+$/)){
+  		return 'Invalid email format (valid example-user@domain)';
+		}
+	return '';
+}
+
+
+
+class Account extends React.Component {
+	
+	constructor(props){
+		//alert('account called');
+		super(props);
+		this.app = props.app;
+		this.state = {
+			fname:'',
+			lname:'',
+		};
+		this.submitHandler = this.submitHandler.bind(this);
+	} 
+	
+	componentWillMount(){
+		const self = this;
+  	let info = localStorage.getItem(USER_KEY).split('|');
+  	let fname, lname;
+  	if(localStorage.getItem(USER_KEY)){
+  		this.app.ws.info(info[0],info[1])
+  		.then(function(response) {
+  				if(response.status !== 'ERROR_UNAUTHORIZED'){
+  					fname = response.fname;
+  					lname = response.lname;	
+						self.setState({fname:fname, lname:lname});
+					}else{
+						localStorage.setItem(USER_KEY, '');
+						self.app.setActive(<Login app={self.app}/>); 
+					}
+				});	
+		}
+	}
+    
+  submitHandler(event){
+		const self = this;
+  	localStorage.setItem(USER_KEY, '');
+		self.app.setActive(<Login app={self.app}/>); 
+		event.preventDefault(); 	
+  }
+  render() {
+ 		const {fname, lname} = this.state;
+ 		const {submitHandler} = this;
+		return(
+			<div className="Account">
+    			<h1>Account</h1>
+    			<h3>Welcome</h3>
+	    		<p className ="userdetails">{fname} {lname}</p>
+			<form onSubmit={submitHandler}>
+	     		<input name="submit" type="submit" value="Logout" className="control"/>	
+			</form>
+     	</div>
+		);	
+  }
+
+} // class account
+
+class Register extends React.Component {
+	
+	constructor(props){
+		super(props);
+		this.app = props.app;
+		this.state = {
+			fname:'',
+			lname:'',
+			email: '',
+			pw: '',
+			cpw:'',
+			registerError:'',
+			genError: '',
+			pwError:'',
+			emailError:'',
+		};
+		this.emailFormatHandler = this.emailFormatHandler.bind(this);
+		this.pwFormatHandler = this.pwFormatHandler.bind(this);
+		this.cpwFormatHandler = this.cpwFormatHandler.bind(this);
+		this.submitHandler = this.submitHandler.bind(this);
+		this.changeHandler = this.changeHandler.bind(this);
+	} 
+
+  RegistrationIsOk(fname, lname, email, pw, cpw) {
+  	const err = (fname.trim().length === 0 || lname.trim().length === 0|| email.trim().length === 0 || 
+    							pw.trim().length === 0 || pw.trim().length === 0) ? 'all fields required' : '';
+    this.setState({registerError: err});
+    return err.length === 0;
+  }
+  
+  
+  pwFormatHandler(event){
+  	const pw = event.target.value;
+  	if(pw.trim().length > 0 && (pw.trim().length < 8 || pw.match(/\s/) || 
+      											!pw.match(/[0-9]/))){
+      console.log(pw.trim().length);
+  		this.setState({pwError: 'Password should contain atleat 8 characters, 1 digit and no spaces'});							
+    }else{
+	    this.setState({pwError: ''});
+    }
+  }  
+  
+  cpwFormatHandler(event){
+  	const cpw = event.target.value;
+  	const pw = this.state.pw;
+  	if(pw.trim().length !==0 && cpw.trim().length !==0 && cpw != pw){
+  		this.setState({registerError: 'password do not match'});
+  	}
+  }
+
+	emailFormatHandler(event){
+		const err = emailFormatHandler(event);
+		this.setState({emailError: err});
+	}
+  
+  changeHandler(event) {
+    var change = {}
+    change[event.target.name] = event.target.value
+    change['registerError'] = '';
+    this.setState(change);
+  }
+
+  
+  submitHandler(event){
+  	const fname = this.state.fname.trim();
+  	const lname = this.state.lname.trim();
+  	const email = this.state.email.trim();
+  	const pw = this.state.pw;
+  	const cpw = this.state.cpw;
+  	const self = this;
+  	if(this.RegistrationIsOk(fname, lname, email, pw, cpw)){
+  		
+  		if(email.trim().length !== 0 && !email.match(/^\w+@\w+$/)){
+	  		self.setState({fname:fname, lname:lname, emailError: 'Invalid email format (valid example-user@domain)'});
+  		}else
+  		if(pw.trim().length > 0 && (pw.trim().length < 8 || pw.match(/\s/) || 
+      											!pw.match(/[0-9]/))){
+      	console.log(pw.trim().length);
+  			this.setState({pwError: 'Password should contain atleat 8 characters, 1 digit and no spaces'});							
+    	}else
+  		if(pw !== cpw){
+  			self.setState({fname:fname, lname:lname, email:email, registerError: 'Passwords do not match'});
+  		}else{
+  			this.app.ws.register(email, pw, {fname:fname, lname:lname})
+  			.then(function(response){
+  				//alert(JSON.stringify(response))
+  				if(response.status === 'CREATED'){
+		 				localStorage.setItem(USER_KEY, `${email}|${response.authToken}`);
+						let userId = localStorage.getItem(USER_KEY).split('|');
+						self.app.setActive(<Account app={self.app}/>);
+  				}
+  			}).catch(function(err){
+  				//alert(JSON.stringify(err))
+  					if(err.response && err.response.status === 401){
+		  				self.setState({registerError: `user with id ${email} already registered`});
+  			  	}else{
+  	  				self.setState({registerError: 'internal server error'});
+  			  	}							
+  			})
+  		}
+  	}
+		event.preventDefault();
+  }
+  
+  render() {
+  	const {fname, lname, email, pw, cpw, registerError, genError, pwError, emailError} = this.state;
+  	const {emailFormatHandler, pwFormatHandler, submitHandler, changeHandler, cpwFormatHandler} = this;
+  	return (
+  		<div>
+		    <h1>Register</h1>
+				 <p className ="error">{genError}</p>
+				 <form onSubmit = {submitHandler}>
+		     <table>
+		     	<tbody>
+		    	<tr>
+							<td><span className="label">first name</span></td>
+							<td><input name="fname" className="control" value={fname} onBlur = {changeHandler} onChange = {changeHandler}/></td>
+		      </tr>
+		    	<tr>	
+							<td><span className="label">last name</span></td>
+							<td><input name="lname" className="control" value={lname} onBlur = {changeHandler} onChange = {changeHandler}/></td>
+		    	</tr>
+		    	<tr>	
+							<td><span className="label">email</span></td>
+							<td><input name="email" className="control" value={email} onBlur = {emailFormatHandler} onChange={changeHandler}/></td>
+		      		<td>
+					 				<span className="error">{emailError}<br/></span>
+					 		</td>
+		      </tr>
+		    	<tr>  
+		     			<td> <span className="label">password</span></td>
+							<td><input type="password" name="pw" className="control" value={pw} onBlur = {pwFormatHandler} onChange = {changeHandler}/></td>
+							<td>
+					 				<span className="error">{pwError}<br/></span>
+					 		</td>
+			    </tr>
+			    <tr>  
+		     			<td> <span className="label">confirm password</span></td>
+							<td><input type="password" name="cpw" className="control" value={cpw} onBlur={cpwFormatHandler} onChange={changeHandler}/></td>
+		     </tr>
+		    	</tbody>
+		    </table>
+	 				<span className="error">{registerError}<br/></span>
+       		<input name="submit" type="submit" value="Register" className="control"/>
+ 				</form>
+  		</div>
+  	);
+  }
+
+} // class register
+
+class Login extends React.Component {
+	
+	constructor(props){
+		super(props);
+		this.app = props.app;
+		this.state = {
+			email: '',
+			pw: '',
+			loginError:'',
+			genError: '',
+		};
+		this.changeHandler = this.changeHandler.bind(this);
+		this.submitHandler = this.submitHandler.bind(this);
+		this.emailFormatHandler = this.emailFormatHandler.bind(this);
+	} 
+
+  LoginIsOk(email, pw) {
+    const err = (email.trim().length === 0 || pw.trim().length === 0 ) ? 'email or password cannot be empty' : '';
+    this.setState({loginError: err});
+    return err.length === 0;
+  }
+  
+  changeHandler(event) {
+    var change = {}
+    change[event.target.name] = event.target.value;
+    change['loginError'] = '';
+    this.setState(change)
+  }
+  
+  	emailFormatHandler(event){
+		const err = emailFormatHandler(event);
+		this.setState({loginError: err});
+	}
+  
+  submitHandler(event){
+  	const email = this.state.email.trim();
+  	const pw = this.state.pw;
+  	const self = this;
+  	if(this.LoginIsOk(email, pw)){
+  		if(!email.match(/^\w+@\w+$/)){
+  			self.setState({loginError: 'Invalid email format (valid example-user@domain)'});
+  		}else{
+  		this.app.ws.login(email, pw)
+  		.then(function(result){
+  			//alert(JSON.stringify(result));
+  			if(result.status === 'ERROR_NOT_FOUND' || result.status === 'ERROR_UNAUTHORIZED'){
+  				self.setState({loginError: 'email or password do not match'});
+  			}else{
+		 					localStorage.setItem(USER_KEY, `${email}|${result.authToken}`);
+							self.app.setActive(<Account app={self.app} />);  				
+  				}
+  		}).catch(function(err){
+  			self.setState({loginError: 'internal server error'});
+  		})
+  		}
+  	}
+		event.preventDefault();
+  }
+  
+  render() {
+  	const {email, pw, loginError, genError} = this.state;
+  	const {changeHandler, submitHandler, emailFormatHandler} = this;
+  	const session = localStorage.getItem(USER_KEY);
+  	if(session){
+				this.app.setActive(<Account app={this.app}/>);  				  		
+  	}
+  	return (
+  		<div>
+		    <h1>Login</h1>
+				 <p className ="error">{genError}</p>
+				 <form onSubmit = {submitHandler}>
+		     <table>
+		     <tbody>
+		    	<tr>  
+							<td><span className="label">email</span></td>
+							<td><input name="email" className="control" value={email} onBlur = {emailFormatHandler} onChange = {changeHandler}/></td>
+		      </tr>
+		    	<tr>  
+		     			<td> <span className="label">password</span></td>
+							<td><input type="password" name="pw" className="control" value={pw} onBlur = {changeHandler} onChange = {changeHandler}/></td>
+			     </tr>
+			   </tbody>
+		    </table>
+	 				<span className="error">{loginError}<br/></span>
+       		<input name="submit" type="submit" value="Login" className="control"/>
+ 				</form>
+  		</div>
+  	
+  	);
+  }
+
+} // class login
+
+class App extends React.Component {
+  constructor(props) {
+    super(props);
+    this.ws = props.ws;
+    this.state = { active: <Login app={this}/> }
+    this.clickHandler = this.clickHandler.bind(this);
+  }
+
+  setActive(component) {
+    this.setState({active: component});
+  }
+  
+  clickHandler(event) {
+    const id = event.target.id;
+    const component =
+      (id === 'Register') ? <Register app={this}/> : <Login app={this}/>;
+    this.setActive(component);
+    event.preventDefault();
+  }  
+  
+  render() {
+	  const activeId = this.state.active.type.name;
+    let links = [];
+    for (const id of ['Login', 'Register']) {
+      if (activeId !== id && activeId !== 'Account') {
+				const searchLink =
+        <div key={id}>
+	        <a href="#" onClick={this.clickHandler} id={id}>{id}</a>
+		    <br/>
+			  </div>;
+				links.push(searchLink);
+      }
+    }
+    return (
+      <div>
+				{this.state.active}<br/>
+				{links}
+      </div>
+    );
+  }
+} // class App
+	
+const ws = new UserService();
+ReactDOM.render(
+  <App ws={ws}/>,
+  document.getElementById('root')
+);
+})();  //end IIFE
+  </script>
+  
+  </body>
+</html>
+
